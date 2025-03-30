@@ -26,6 +26,7 @@ def fetch_words(selected_user, df):
 
 def fetch_emojis(selected_user, df):
     emojis = []
+    df["Message"] = df["Message"].astype(str)
     if(selected_user != "Overall"):
         df = df[df['Sender'] == selected_user]
     for msg in df['Message']:
@@ -65,11 +66,12 @@ def most_busy_user(df):
 
 
 def create_wordcloud(selected_user, df):
+    from wordcloud import WordCloud
     if(selected_user != 'Overall'):
         df = df[df['Sender'] == selected_user]
         
     f=open('stop_hinglish.txt','r')
-    stopWords=f.read()
+    stopWords=set(f.read().split())
     temp= df[df['Sender'] != 'group notification']
     temp = temp[temp['Message'] != '<Media omitted>']
     temp=temp[temp['Message'] != 'This message was deleted']
@@ -82,8 +84,12 @@ def create_wordcloud(selected_user, df):
                 y.append(word)
         return ' '.join(y)
     
-    msg = temp['Message'].apply(rem_stop_word)
+    msg = temp['Message'].dropna().apply(rem_stop_word)
     
+    if msg.str.cat(sep=' ').strip() == '':
+      print("⚠️ No words left after filtering. Word cloud cannot be generated.")
+      return None 
+
     wc= WordCloud(width=800, height=400, max_words=200, background_color='white', min_font_size=10)
     df_wc=wc.generate(msg.str.cat(sep=' '))
     return df_wc
@@ -157,16 +163,19 @@ def activity_heatmap(selected_user, df):
     if(selected_user != 'Overall'):
         df = df[df['Sender'] == selected_user]
         
-    # Combine 'Time' and 'AM/PM' into a single datetime column
-    data1=df
-    data1['Datetime'] = pd.to_datetime(df['Time'] + ' ' + df['Period'], format='%I:%M %p')
-
+    data1=df.copy()
+    # Ensure Datetime column includes both date and time
+    data1['Datetime'] = pd.to_datetime(data1['Date'].astype(str) + ' ' + data1['time'].astype(str), errors='coerce')
+   
     # Create a column for 2-hour intervals
     data1['Interval_Start'] = data1['Datetime'].dt.floor('2H')
     data1['Interval_End'] = data1['Interval_Start'] + pd.Timedelta(hours=2)
-
-    # Format the intervals as "HH:MM - HH:MM"
-    data1['Interval'] = data1['Interval_Start'].dt.strftime('%H:%M') + ' - ' + df['Interval_End'].dt.strftime('%H:%M')
+    
+    # Format the intervals dynamically based on the time format
+    if df['Time'].str.contains(r'^\d{2}:\d{2}$', regex=True).any():  # checking whether 24-hour format
+        data1['Interval'] = data1['Interval_Start'].dt.strftime('%H:%M') + ' - ' + data1['Interval_End'].dt.strftime('%H:%M')
+    else:  # Default to 12-hour format
+        data1['Interval'] = data1['Interval_Start'].dt.strftime('%I:%M %p') + ' - ' + data1['Interval_End'].dt.strftime('%I:%M %p')
 
     # Group by the interval and count the messages
     data = data1[['Day_name','Interval','Message']]
